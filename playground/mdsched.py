@@ -7,7 +7,8 @@ class ThreadState(Enum):
     IDLE = 0
     RUNNING = 1
     BLOCKED = 2
-    TERMINATED = 3
+    WAITING = 3
+    TERMINATED = 4
 
 class LockState(Enum):
     UNLOCKED = 0
@@ -37,10 +38,14 @@ class Scheduler:
         return None
 
     def run(self,thread):
+        if self.debug:
+            thread_names = [t.name for t in self.ready_queue]
+            print(f"[Scheduler Info] Thread {thread.name} is chosen from the {thread_names} queue ")
         if self.state[thread] != ThreadState.BLOCKED:
-            self.state[thread] = ThreadState.RUNNING   
-            if self.debug:
-                print(f"[Scheduler Info] Starting {thread.name} at {get_time()}")
+            self.state[thread] = ThreadState.RUNNING
+            # print(f"[Scheduler Info] Running {thread.name} at {get_time()}")   
+            # if self.debug:
+            #     print(f"[Scheduler Info] Starting {thread.name} at {get_time()}")
             thread.run()
         if self.state[thread] == ThreadState.RUNNING:
             if self.debug:
@@ -52,8 +57,8 @@ class Scheduler:
         if self.debug:
             print("Scheduler started at: ", get_time())
         while scheduler.ready_queue:
-            if self.debug:
-                print("Ready queue:", [t.name for t in self.ready_queue])
+            # if self.debug:
+            #     print("Ready queue:", [t.name for t in self.ready_queue])
             thread = self.pick_next_thread()
             scheduler.run(thread)
             
@@ -97,35 +102,41 @@ class ThreadWrapper(threading.Thread):
         else:
             return False
     def join(self, timeout = None):
-        if scheduler.debug:
-            print(f"Thread join called for {self.name}")
+        # if scheduler.debug:
+        #     print(f"Thread join called for {self.name}")
         calling_thread = get_calling_thread()
     
         if scheduler.debug:
             print(f"Thread {calling_thread.name} is waiting for {self.name} to finish") 
         
         if scheduler.state[self] != ThreadState.TERMINATED:
-            if scheduler.debug:
-                print(f"Thread {calling_thread.name} is waiting for {self.name} to finish") 
+            # if scheduler.debug:
+            #     print(f"Thread {calling_thread.name} is waiting for {self.name} to finish") 
             scheduler.ready_queue.remove(calling_thread)
             scheduler.state[calling_thread] = ThreadState.BLOCKED
 
         while True:    
             thread = scheduler.pick_next_thread()
             if thread == self:
-                scheduler.run(self)
-                scheduler.state[calling_thread] = ThreadState.IDLE
-                scheduler.ready_queue.append(calling_thread)
+                if scheduler.state[self]!=ThreadState.WAITING:
+                    scheduler.run(self)
+                    scheduler.state[calling_thread] = ThreadState.WAITING
+                    scheduler.ready_queue.append(calling_thread)
+                else :
+                    super().join(timeout)
+                    scheduler.state[calling_thread] = ThreadState.WAITING
+                    scheduler.ready_queue.append(calling_thread)
+
 
             elif thread == calling_thread and scheduler.state[self] == ThreadState.TERMINATED:
                 scheduler.state[calling_thread] = ThreadState.RUNNING
                 break
 
-
             elif thread == None:
-                print(f"Deadlock detected, thread {self.name} is waiting for {calling_thread.name} to finish")
+                raise RuntimeError(f"Deadlock detected, thread {self.name} is waiting for {calling_thread.name} to finish")
                 exit(1)
-            else:
+            elif scheduler.state[thread] != ThreadState.WAITING:
+                # print(f"Thread {thread.name} is sent to waiting queue")
                 scheduler.run(thread)
 class NewLock():
     def __init__(self):
@@ -152,7 +163,7 @@ class NewLock():
                     #     print(f"The next thread to execute when waiting for lock to be release is {thread.name}")
                     if thread == holder_thread:
                         scheduler.run(holder_thread)
-                        scheduler.state[calling_thread] = ThreadState.IDLE
+                        scheduler.state[calling_thread] = ThreadState.WAITING
                         scheduler.ready_queue.append(calling_thread)
                     
                     elif thread == calling_thread and scheduler.lock_state[self] == LockState.UNLOCKED:
@@ -161,8 +172,9 @@ class NewLock():
                     
                     elif thread == None:
                         raise RuntimeError(f"Deadlock detected, thread {calling_thread.name} is waiting for {holder_thread.name} to release the lock")
-                    else:
+                    elif scheduler.state[thread] != ThreadState.WAITING:
                         scheduler.run(thread)
+
                   
         else:
             if scheduler.lock_state[self]==LockState.UNLOCKED and scheduler.lock_holder[self] == None:
@@ -172,16 +184,15 @@ class NewLock():
             else:
                 return False
     def release(self):
+        calling_thread = get_calling_thread()
         if scheduler.lock_state[self] == LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
             scheduler.lock_state[self] = LockState.UNLOCKED
             scheduler.lock_holder[self] = None
             return True
         elif scheduler.lock_state[self]==LockState.LOCKED and scheduler.lock_holder[self] != get_calling_thread():
-            calling_thread = get_calling_thread()
-            raise RuntimeError("Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {calling_thread.name}")
+            raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {calling_thread.name}")
         elif scheduler.lock_state[self] == LockState.UNLOCKED:
-            calling_thread = get_calling_thread().name
-            raise RuntimeError("Cannot release an unlocked lock {calling_thread} ")
+            raise RuntimeError(f"Cannot release an unlocked lock {calling_thread.name} ")
         
     def locked(self):
         if scheduler.lock_state[self] == LockState.LOCKED:
@@ -189,38 +200,62 @@ class NewLock():
         else:   
             return False
 
-            
+
+class NewRLock(NewLock):
+    def __init__(self):
+        super().__init__()
+    def acquire(self, blocking=True, timeout=-1):
+        if scheduler.lock_state[self]==LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
+            return True
+        else:
+            super().acquire(blocking, timeout)
+    def release(self):
+        super().release()
+    def locked(self):
+        super().locked()
+
+
 def new_thread(target, args=()):
     t = ThreadWrapper(target=target, args=args)
     return t
 
 def task(id):    
-    print(f"Thread {id} is going to sleep for 2 seconds")
+    # print(f"Thread {id} is going to sleep for 2 seconds")
+    lock_1.acquire()
     lock_1.acquire()
     time.sleep(2)
     lock_1.release()
-    print(f"Thread {id} had a good sleep")
+    # print(f"Thread {id} had a good sleep")
 
 def task_special(thread):
-    print(f"We will wait for {thread.name}")
+    # print(f"We will wait for {thread.name}")
     lock_2.acquire()
+    # lock_2.acquire()
     thread.join(thread)
     lock_2.release()
-    print(f"Looks like {thread.name} is done")
+    # print(f"Looks like {thread.name} is done")
+
+def task_special2(thread):
+    # print(f"We will wait for {thread.name}")
+    lock_3.acquire()
+    thread.join(thread)
+    lock_3.release()
+    # print(f"Looks like {thread.name} is done")
 
 start_time = time.time()
 
 def get_time():
     return (time.time() - start_time)
 
-scheduler = Scheduler(debug=False)
-lock_1 = NewLock()
+scheduler = Scheduler(debug=True)
+lock_1 = NewRLock()
 lock_2 = NewLock()
+lock_3 = NewLock()
 
 if __name__ == "__main__":
     threads = [new_thread(task,args=(i+1,)) for i in range(3)]
     threads.append(new_thread(task_special, args=(threads[2],)))
-    threads.append(new_thread(task_special, args=(threads[3],)))
+    threads.append(new_thread(task_special2, args=(threads[3],)))
     for t in threads:
         scheduler.register(t)
     scheduler.start()
