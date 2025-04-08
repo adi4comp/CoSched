@@ -271,6 +271,8 @@ class NewRLock(NewLock):
         scheduler.rlock_counter[self] = 0
         
     def acquire(self, blocking=True, timeout=-1):
+        if scheduler.rlock_counter[self]==0:
+            scheduler.rlock_counter[self] = 1
         if scheduler.lock_state[self]==LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
             scheduler.rlock_counter[self] += 1
             scheduler.main_greenlet.switch()
@@ -279,14 +281,14 @@ class NewRLock(NewLock):
             return super().acquire(blocking, timeout)
             
     def release(self):
-        while scheduler.rlock_counter[self] > 1:
-            if scheduler.lock_state[self] == LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
-                scheduler.rlock_counter[self] -= 1
-            else:
-                raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {get_calling_thread().name}")
-            scheduler.main_greenlet.switch()
-        scheduler.rlock_counter[self] = 0
-        super().release()
+        if scheduler.lock_state[self] == LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
+            scheduler.rlock_counter[self] -= 1
+            if scheduler.rlock_counter[self] == 0:
+                super().release()
+        else:
+            raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {get_calling_thread().name}")
+        scheduler.main_greenlet.switch()
+        
 
         
     def locked(self):
@@ -301,10 +303,14 @@ def new_thread(target, args=()):
 def task(id):   
     print(f"Thread {id} is trying to acquire lock_1")
     lock_1.acquire()
+    print(f"Thread {id} will aqquire lock_1 again")
+    lock_1.acquire()
     print(f"Lock acquired, Thread {id} is going to sleep for 2 seconds")
     time.sleep(2)
     print(f"Thread {id} had a good sleep, now releasing lock_1")
     lock_1.release()
+    # print(f"Thread {id} will release lock_1 again")
+    # lock_1.release()
     print(f"Thread {id} has released lock_1")
 
 
@@ -316,6 +322,7 @@ def task_special(thread):
 def task_special2(thread):
     print(f"Trying to acquire lock_2")
     lock_2.acquire()
+
     print(f"Lock acquired,We will wait for {thread.name} to finish")
     thread.join()
     lock_2.release()
