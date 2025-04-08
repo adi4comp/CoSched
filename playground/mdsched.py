@@ -2,6 +2,7 @@ import threading
 import random
 import time
 from enum import Enum
+from greenlet import greenlet
 
 class ThreadState(Enum):
     IDLE = 0
@@ -34,7 +35,10 @@ class Scheduler:
 
     def pick_next_thread(self):
         if self.ready_queue:
-            return random.choice(self.ready_queue)
+            # return random.choice(self.ready_queue)
+
+            index = int(input("Enter the next thread index to run: "))
+            return self.threads[index]
         return None
 
     def run(self,thread):
@@ -85,11 +89,24 @@ def get_calling_thread():
 class ThreadWrapper(threading.Thread):
     def __init__(self, target=None, args=()):
         super().__init__(target=target, args=args)
+        self._preserve_target = self._target
+        self._preserve_args = self._args
+        self._preserve_kwargs = self._kwargs
+
     def start(self):
         scheduler.register(self)
     def run(self):
         if scheduler.state[self] == ThreadState.RUNNING:
-            super().run()
+            try:
+                super().run()
+            except AttributeError:
+                # If super().run() deletes attributes we need, restore them
+                if not hasattr(self, '_target'):
+                    self._target = self._preserve_target
+                if not hasattr(self, '_args'):
+                    self._args = self._preserve_args
+                if not hasattr(self, '_kwargs'):
+                    self._kwargs = self._preserve_kwargs
         elif self in scheduler.threads:
             print(f"[Info] Thread {self.name} is in the queue")
         else:
@@ -118,26 +135,22 @@ class ThreadWrapper(threading.Thread):
         while True:    
             thread = scheduler.pick_next_thread()
             if thread == self:
-                if scheduler.state[self]!=ThreadState.WAITING:
-                    scheduler.run(self)
-                    scheduler.state[calling_thread] = ThreadState.WAITING
-                    scheduler.ready_queue.append(calling_thread)
-                else :
-                    super().join(timeout)
-                    scheduler.state[calling_thread] = ThreadState.WAITING
-                    scheduler.ready_queue.append(calling_thread)
-
-
+                scheduler.run(thread)
+                scheduler.state[calling_thread] = ThreadState.WAITING
+                scheduler.ready_queue.append(calling_thread)
+                return True
             elif thread == calling_thread and scheduler.state[self] == ThreadState.TERMINATED:
                 scheduler.state[calling_thread] = ThreadState.RUNNING
-                break
-
+                return True
             elif thread == None:
-                raise RuntimeError(f"Deadlock detected, thread {self.name} is waiting for {calling_thread.name} to finish")
-                exit(1)
-            elif scheduler.state[thread] != ThreadState.WAITING:
-                # print(f"Thread {thread.name} is sent to waiting queue")
-                scheduler.run(thread)
+                if scheduler.state[calling_thread] != ThreadState.TERMINATED:
+                    raise RuntimeError(f"Deadlock detected, thread {self.name} is waiting for {calling_thread.name} to terminate")
+                else:
+                    return True
+            elif scheduler.state[thread] == ThreadState.WAITING:
+                continue
+            else:
+                scheduler.run(thread)   
 class NewLock():
     def __init__(self):
         self.locked = False
@@ -221,25 +234,27 @@ def new_thread(target, args=()):
 
 def task(id):    
     # print(f"Thread {id} is going to sleep for 2 seconds")
-    lock_1.acquire()
-    lock_1.acquire()
+    # lock_1.acquire()
+    # lock_1.acquire()
     time.sleep(2)
-    lock_1.release()
+    # lock_1.release()
     # print(f"Thread {id} had a good sleep")
 
 def task_special(thread):
     # print(f"We will wait for {thread.name}")
-    lock_2.acquire()
+    # lock_2.acquire()
     # lock_2.acquire()
     thread.join(thread)
-    lock_2.release()
+    # lock_2.release()
     # print(f"Looks like {thread.name} is done")
 
 def task_special2(thread):
     # print(f"We will wait for {thread.name}")
-    lock_3.acquire()
-    thread.join(thread)
-    lock_3.release()
+    # lock_3.acquire()
+    print(f"Thread is going to ramdomfunc")
+    thread.join()
+    print(f"Thread is back from randomfunc")
+    # lock_3.release()
     # print(f"Looks like {thread.name} is done")
 
 start_time = time.time()
@@ -251,6 +266,7 @@ scheduler = Scheduler(debug=True)
 lock_1 = NewRLock()
 lock_2 = NewLock()
 lock_3 = NewLock()
+
 
 if __name__ == "__main__":
     threads = [new_thread(task,args=(i+1,)) for i in range(3)]
