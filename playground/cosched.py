@@ -93,6 +93,7 @@ class Scheduler:
                     else:
                         thread.run()
                 except Exception as e:
+                    self.state[thread] = ThreadState.TERMINATED
                     print(f"[ERROR] Exception in thread {thread.name}: {e}")
                 finally:
                     if self.debug:
@@ -188,7 +189,7 @@ class ThreadWrapper(threading.Thread):
             
 
 
-class NewLock():
+class Lock():
     def __init__(self):
         self.locked = False
         scheduler.register_lock(self)
@@ -261,7 +262,7 @@ class NewLock():
             return False
 
 
-class NewRLock(NewLock):
+class RLock(Lock):
     def __init__(self):
         super().__init__()
         scheduler.rlock_counter[self] = 0
@@ -291,6 +292,64 @@ class NewRLock(NewLock):
         return super().locked()
 
 
+class Semaphore():
+    def __init__(self, value=1):
+        self.value = value
+        self.lock = threading.Lock()
+        # scheduler.register_semaphore(self)
+        self.queue = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        calling_thread=get_calling_thread()
+        flag = False
+        if scheduler.debug:
+            print(f"[semaphone acquire] Semaphore value: {self.value}")
+        if blocking:
+            if self.value > 0:
+                scheduler.state[calling_thread] = ThreadState.IDLE
+                self.value -= 1
+                flag = True
+
+            else:
+                if scheduler.debug:
+                    print(f"[Acquire] Semaphore is not available, blocking thread {calling_thread.name}")
+                scheduler.state[calling_thread] = ThreadState.BLOCKED
+                self.queue.append(calling_thread)
+                if calling_thread in scheduler.ready_queue:
+                    scheduler.ready_queue.remove(calling_thread)
+                
+            scheduler.main_greenlet.switch()
+            if flag:
+                scheduler.state[calling_thread] = ThreadState.RUNNING
+                return True
+            else:
+                self.acquire(blocking, timeout) 
+    def release(self):
+        if scheduler.debug:
+            print(f"[semaphone release] Semaphore value: {self.value}")
+        calling_thread=get_calling_thread()
+        if self.value == 0:
+            for t in self.queue:
+                scheduler.state[t] = ThreadState.IDLE
+                if t not in scheduler.ready_queue:
+                    scheduler.ready_queue.append(t)
+        self.value += 1
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        scheduler.main_greenlet.switch()
+        return True
+    
+
+class BoundedSemaphore(Semaphore):
+    def __init__(self, value=1):
+        super().__init__(value)
+        self._initial = value
+
+
+    def release(self):
+        if self.value >= self._initial:
+            raise ValueError("Semaphore released too many times")
+        super().release()
+
 def new_thread(target, args=()):
     t = ThreadWrapper(target=target, args=args)
     # t.name = f"T-{len(scheduler.threads)+1}"
@@ -304,6 +363,10 @@ def task(id):
     print(f"Lock acquired, Thread {id} is going to sleep for 2 seconds")
     time.sleep(2)
     print(f"Thread {id} had a good sleep, now releasing lock_1")
+    lock_1.release()
+    print(f"Thread {id} will release lock_1 again")
+    lock_1.release()
+    print(f"Thread {id} will release lock_1 again")
     lock_1.release()
     print(f"Thread {id} will release lock_1 again")
     lock_1.release()
@@ -332,8 +395,8 @@ def get_time():
 
 
 scheduler = Scheduler(debug=False)
-lock_1 = NewRLock()
-lock_2 = NewLock()
+lock_1 = BoundedSemaphore(value=2)
+lock_2 = Lock()
 
 if __name__ == "__main__":
 
