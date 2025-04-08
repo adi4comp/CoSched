@@ -2,7 +2,6 @@ import threading
 import random
 import time
 from enum import Enum
-from greenlet import greenlet
 
 class ThreadState(Enum):
     IDLE = 0

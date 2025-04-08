@@ -26,6 +26,8 @@ class Scheduler:
         self.locks = []
         self.lock_state = {}
         self.lock_holder = {}
+        self.lock_queue = {}
+        self.rlock_counter = {}
         self.debug = debug    
         self.greenlets = {} 
         
@@ -84,6 +86,7 @@ class Scheduler:
         self.locks.append(lock)
         self.lock_state[lock] = LockState.UNLOCKED
         self.lock_holder[lock] = None
+        self.lock_queue[lock] = []
     
     def preempt_thread(self, thread):
         if thread not in self.greenlets:
@@ -199,8 +202,10 @@ class NewLock():
             if scheduler.lock_state[self]==LockState.UNLOCKED and scheduler.lock_holder[self] == None:
                 scheduler.lock_state[self] = LockState.LOCKED
                 scheduler.lock_holder[self] = get_calling_thread()
-                return True
+                scheduler.state[get_calling_thread()] = ThreadState.IDLE
             else:
+                if scheduler.debug:
+                    print(f"[Acquire] Lock is already held by {scheduler.lock_holder[self]}")
                 calling_thread = get_calling_thread()
                 scheduler.state[calling_thread] = ThreadState.BLOCKED
                 if calling_thread in scheduler.ready_queue:
@@ -208,21 +213,23 @@ class NewLock():
                     
                 holder_thread = scheduler.lock_holder[self]
                 if scheduler.state[holder_thread] == ThreadState.TERMINATED:
+                    scheduler.state[get_calling_thread] = ThreadState.TERMINATED
                     raise RuntimeError(f"Thread {holder_thread.name} is terminated and didn't release the lock")
                 
-                # Switch to scheduler to let it run other threads
-                scheduler.main_greenlet.switch()
+                scheduler.lock_queue[self].append(calling_thread)
                 
-                # When execution returns here, the lock should be available
-                scheduler.lock_state[self] = LockState.LOCKED
-                scheduler.lock_holder[self] = calling_thread
-                return True
+            scheduler.main_greenlet.switch()
+            scheduler.lock_state[self] = LockState.LOCKED
+            scheduler.lock_holder[self] = get_calling_thread()
+            return True
         else:
             if scheduler.lock_state[self]==LockState.UNLOCKED and scheduler.lock_holder[self] == None:
                 scheduler.lock_state[self] = LockState.LOCKED
                 scheduler.lock_holder[self] = get_calling_thread()
+                scheduler.main_greenlet.switch()
                 return True
             else:
+                scheduler.main_greenlet.switch()
                 return False
                 
     def release(self):
@@ -230,12 +237,27 @@ class NewLock():
         if scheduler.lock_state[self] == LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
             scheduler.lock_state[self] = LockState.UNLOCKED
             scheduler.lock_holder[self] = None
-            return True
+            if scheduler.lock_queue[self]:
+                next_thread = scheduler.lock_queue[self].pop(0)
+                scheduler.state[next_thread] = ThreadState.IDLE
+                if next_thread not in scheduler.ready_queue:
+                    scheduler.ready_queue.append(next_thread)
+                if scheduler.debug:
+                    print(f"[Release] Lock released by {calling_thread.name}, waking up {next_thread.name}")
+            else:
+                if scheduler.debug:
+                    print(f"[Release] Lock released by {calling_thread.name}, no threads waiting")
+
         elif scheduler.lock_state[self]==LockState.LOCKED and scheduler.lock_holder[self] != get_calling_thread():
+            scheduler.state[get_calling_thread] = ThreadState.TERMINATED
             raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {calling_thread.name}")
+        
         elif scheduler.lock_state[self] == LockState.UNLOCKED:
+            scheduler.state[get_calling_thread] = ThreadState.TERMINATED
             raise RuntimeError(f"Cannot release an unlocked lock {calling_thread.name} ")
         
+        scheduler.main_greenlet.switch()
+               
     def locked(self):
         if scheduler.lock_state[self] == LockState.LOCKED:
             return True
@@ -246,15 +268,26 @@ class NewLock():
 class NewRLock(NewLock):
     def __init__(self):
         super().__init__()
+        scheduler.rlock_counter[self] = 0
         
     def acquire(self, blocking=True, timeout=-1):
         if scheduler.lock_state[self]==LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
+            scheduler.rlock_counter[self] += 1
+            scheduler.main_greenlet.switch()
             return True
         else:
             return super().acquire(blocking, timeout)
             
     def release(self):
+        while scheduler.rlock_counter[self] > 1:
+            if scheduler.lock_state[self] == LockState.LOCKED and scheduler.lock_holder[self] == get_calling_thread():
+                scheduler.rlock_counter[self] -= 1
+            else:
+                raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {get_calling_thread().name}")
+            scheduler.main_greenlet.switch()
+        scheduler.rlock_counter[self] = 0
         super().release()
+
         
     def locked(self):
         return super().locked()
@@ -262,14 +295,18 @@ class NewRLock(NewLock):
 
 def new_thread(target, args=()):
     t = ThreadWrapper(target=target, args=args)
-    # Set a name for better debugging
-    t.name = f"Thread-{target.__name__}-{len(scheduler.threads)}"
+    t.name = f"Thread-{len(scheduler.threads)+1}"
     return t
 
-def task(id):    
-    print(f"Thread {id} is going to sleep for 2 seconds")
+def task(id):   
+    print(f"Thread {id} is trying to acquire lock_1")
+    lock_1.acquire()
+    print(f"Lock acquired, Thread {id} is going to sleep for 2 seconds")
     time.sleep(2)
-    print(f"Thread {id} had a good sleep")
+    print(f"Thread {id} had a good sleep, now releasing lock_1")
+    lock_1.release()
+    print(f"Thread {id} has released lock_1")
+
 
 def task_special(thread):
     print(f"We will wait for {thread.name}")
@@ -277,9 +314,12 @@ def task_special(thread):
     print(f"Looks like {thread.name} is done")
 
 def task_special2(thread):
-    print(f"Thread is going to randomfunc")
+    print(f"Trying to acquire lock_2")
+    lock_2.acquire()
+    print(f"Lock acquired,We will wait for {thread.name} to finish")
     thread.join()
-    print(f"Thread is back from randomfunc")
+    lock_2.release()
+    print(f"Looks like {thread.name} is done")
 
 start_time = time.time()
 
@@ -290,12 +330,11 @@ def get_time():
 scheduler = Scheduler(debug=False)
 lock_1 = NewRLock()
 lock_2 = NewLock()
-lock_3 = NewLock()
 
 if __name__ == "__main__":
 
     threads = [new_thread(task, args=(i+1,)) for i in range(3)]
-    threads.append(new_thread(task_special, args=(threads[2],)))
+    threads.append(new_thread(task_special2, args=(threads[2],)))
     threads.append(new_thread(task_special2, args=(threads[3],)))
     
 
