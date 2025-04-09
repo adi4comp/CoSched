@@ -350,6 +350,167 @@ class BoundedSemaphore(Semaphore):
             raise ValueError("Semaphore released too many times")
         super().release()
 
+class Condition():
+    def __init__(self, lock=None):
+        self.lock = lock if lock else RLock()
+        self.blocked = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        return self.lock.acquire(blocking, timeout)
+    def release(self):
+        return self.lock.release()
+    def wait(self, timeout=None):
+        calling_thread = get_calling_thread()
+        if calling_thread not in self.blocked:
+            self.blocked.append(calling_thread)
+        scheduler.state[calling_thread] = ThreadState.BLOCKED
+        if calling_thread in scheduler.ready_queue:
+            scheduler.ready_queue.remove(calling_thread)
+        scheduler.main_greenlet.switch()
+        if calling_thread in self.blocked:
+            self.wait(timeout)
+        else:
+            scheduler.state[calling_thread] = ThreadState.RUNNING
+            return True
+        
+    def wait_for(self,predicate,timeout=None):
+        calling_thread = get_calling_thread()
+        if not predicate():
+            if calling_thread not in self.blocked:
+                self.blocked.append(calling_thread)
+            scheduler.state[calling_thread] = ThreadState.BLOCKED
+            if calling_thread in scheduler.ready_queue:
+                scheduler.ready_queue.remove(calling_thread)
+        else:
+            scheduler.state[calling_thread] = ThreadState.IDLE
+
+        scheduler.main_greenlet.switch()
+        if not predicate():
+            self.wait_for(predicate, timeout)
+        else:
+            scheduler.state[calling_thread] = ThreadState.RUNNING
+            return True
+        
+    def notify(self, n=1):
+        n_threads = min(n, len(self.blocked))
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        for _ in range(n_threads):
+            thread = self.blocked.pop(0)
+            scheduler.state[thread] = ThreadState.IDLE
+            if thread not in scheduler.ready_queue:
+                scheduler.ready_queue.append(thread)
+        scheduler.main_greenlet.switch()
+        return True
+    
+    def notify_all(self):
+        n_thread = len(self.blocked)
+        self.notify(n_thread)
+
+class Event():
+    def __init__(self):
+        self._flag = False
+    
+    def wait(self):
+        if self._flag:
+            calling_thread = get_calling_thread()
+            scheduler.state[calling_thread] = ThreadState.IDLE
+        else:
+            calling_thread = get_calling_thread()
+            scheduler.state[calling_thread] = ThreadState.BLOCKED
+            if calling_thread in scheduler.ready_queue:
+                scheduler.ready_queue.remove(calling_thread)
+
+        scheduler.main_greenlet.switch()
+        if self._flag:
+            scheduler.state[calling_thread] = ThreadState.RUNNING
+            return True
+        else:
+            self.wait()
+    
+    def is_set(self):
+        if self._flag:
+            return True
+        else:
+            return False
+        
+    def clear(self):
+        self._flag = False
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        scheduler.main_greenlet.switch()
+        scheduler.state[calling_thread] = ThreadState.RUNNING
+        return True
+    def set(self):
+        self._flag = True
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        scheduler.main_greenlet.switch()
+        scheduler.state[calling_thread] = ThreadState.RUNNING
+        return True
+
+
+    
+
+class Barrier():
+    def __init__(self, parties,action=None,timeout=None):
+        self.parties = parties
+        self.action = action
+        self.timeout = timeout
+        self.blocked = []
+        self.aborted = False
+
+    def wait(self):
+            
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.BLOCKED
+        if calling_thread in scheduler.ready_queue:
+            scheduler.ready_queue.remove(calling_thread)
+        if self.aborted:
+            scheduler.main_greenlet.switch()
+            scheduler.state[calling_thread] = ThreadState.TERMINATED
+            raise RuntimeError(f"Barrier is aborted, thread {calling_thread.name} is terminated")
+        id = len(self.blocked)
+        self.blocked.append(calling_thread)
+        if id == (self.parties-1):
+            if self.action:
+                self.action()
+            while self.blocked:
+                thread = self.blocked.pop(0)
+                scheduler.state[thread] = ThreadState.IDLE
+                if thread not in scheduler.ready_queue:
+                    scheduler.ready_queue.append(thread)
+
+        scheduler.main_greenlet.switch()
+        scheduler.state[calling_thread] = ThreadState.RUNNING
+        return id
+    def reset(self):
+        self.blocked = []
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        if calling_thread not in scheduler.ready_queue:
+                scheduler.ready_queue.append(calling_thread)
+        scheduler.main_greenlet.switch()
+        scheduler.state[calling_thread] = ThreadState.RUNNING
+        return True
+
+    def abort(self):
+        calling_thread = get_calling_thread()
+        scheduler.state[calling_thread] = ThreadState.IDLE
+        if calling_thread not in scheduler.ready_queue:
+                scheduler.ready_queue.append(calling_thread)
+        scheduler.main_greenlet.switch()
+        scheduler.state[calling_thread] = ThreadState.RUNNING
+        return True
+    def parties(self):
+        return self.parties
+    def n_waiting(self):
+        return len(self.blocked)
+    def broken(self):
+        return self.aborted
+
+        
+
 def new_thread(target, args=()):
     t = ThreadWrapper(target=target, args=args)
     # t.name = f"T-{len(scheduler.threads)+1}"
