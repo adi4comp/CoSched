@@ -49,22 +49,33 @@ class Scheduler:
                     else:
                         self.preempt_thread(thread)
 
+        error = []
+        for t in self.threads:
+            if self.state[t] != ThreadState.TERMINATED:
+                error.append(t)
+
+        if error:
+            raise RuntimeError(f"[Scheduler Loop] Error: Threads {', '.join([t.name for t in error])} are not terminated due to deadlock")
     def register(self, thread):
         self.threads.append(thread)
         self.ready_queue.append(thread)
         self.state[thread] = ThreadState.IDLE
 
     def pick_next_thread(self):
+        # if self.ready_queue:
+        #     if self.debug:
+        #         print("Available threads:", ", ".join([f"{i}: {t.name}-{i+1}" for i, t in enumerate(self.ready_queue)]))
+        #     try:
+        #         index = int(input("Enter the next thread index to run: "))
+        #         return self.threads[index]
+        #     except (ValueError, IndexError):
+        #         print("Invalid index, enter again")
+        #         return self.pick_next_thread()
+        # return None
         if self.ready_queue:
             if self.debug:
                 print("Available threads:", ", ".join([f"{i}: {t.name}-{i+1}" for i, t in enumerate(self.ready_queue)]))
-            try:
-                index = int(input("Enter the next thread index to run: "))
-                return self.threads[index]
-            except (ValueError, IndexError):
-                print("Invalid index, enter again")
-                return self.pick_next_thread()
-        return None
+            return random.choice(self.ready_queue)
 
     def run(self, thread):
         if self.debug:
@@ -200,6 +211,8 @@ class Lock():
                 self.locked = True
                 scheduler.lock_holder[self] = get_calling_thread()
                 scheduler.state[get_calling_thread()] = ThreadState.IDLE
+                scheduler.main_greenlet.switch()
+                return True
             else:
                 if scheduler.debug:
                     print(f"[Acquire] Lock is already held by {scheduler.lock_holder[self]}")
@@ -214,11 +227,12 @@ class Lock():
                     raise RuntimeError(f"Thread {holder_thread.name} is terminated and didn't release the lock")
                 
                 scheduler.lock_queue[self].append(calling_thread)
+                scheduler.main_greenlet.switch()
+                self.acquire(blocking, timeout)
                 
-            scheduler.main_greenlet.switch()
-            self.locked = True
-            scheduler.lock_holder[self] = get_calling_thread()
-            return True
+            
+            
+                
         else:
             if not self.locked and scheduler.lock_holder[self] == None:
                 self.locked = True
@@ -234,13 +248,16 @@ class Lock():
         if self.locked and scheduler.lock_holder[self] == get_calling_thread():
             self.locked = False
             scheduler.lock_holder[self] = None
+            scheduler.state[calling_thread] = ThreadState.IDLE
+            if calling_thread not in scheduler.ready_queue:
+                scheduler.ready_queue.append(calling_thread)
             if scheduler.lock_queue[self]:
                 next_thread = scheduler.lock_queue[self].pop(0)
                 scheduler.state[next_thread] = ThreadState.IDLE
                 if next_thread not in scheduler.ready_queue:
                     scheduler.ready_queue.append(next_thread)
                 if scheduler.debug:
-                    print(f"[Release] Lock released by {calling_thread.name}, waking up {next_thread.name}")
+                    print(f"[Release] Lock {self.name} released by {calling_thread.name}, waking up {next_thread.name}")
             else:
                 if scheduler.debug:
                     print(f"[Release] Lock released by {calling_thread.name}, no threads waiting")
@@ -249,7 +266,7 @@ class Lock():
             scheduler.state[get_calling_thread] = ThreadState.TERMINATED
             raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {calling_thread.name}")
         
-        elif scheduler.lock_state[self] == LockState.UNLOCKED:
+        elif not self.locked:
             scheduler.state[get_calling_thread] = ThreadState.TERMINATED
             raise RuntimeError(f"Cannot release an unlocked lock {calling_thread.name} ")
         
@@ -556,18 +573,105 @@ def get_time():
 
 
 scheduler = Scheduler(debug=False)
-lock_1 = BoundedSemaphore(value=2)
+lock_1 = RLock()
 lock_2 = Lock()
 
-if __name__ == "__main__":
 
-    threads = [new_thread(task, args=(i+1,)) for i in range(3)]
-    threads.append(new_thread(task_special2, args=(threads[2],)))
-    threads.append(new_thread(task_special2, args=(threads[3],)))
+# Global variables
+m = Lock()
+l = Lock()
+A = 0
+B = 0
+
+def t1():
+    global A
+    print(f"Aqquiring Lock M from thread 1")
+    m.acquire()
+    print(f"Lock M acquired, from thread 1")
+    A += 1
+    if A == 1:
+        print(f"Aqquiring Lock L from thread 1")
+        l.acquire()
+        print(f"Lock L acquired from thread 1")
+    print(f"Lock M acquired, releasing it from thread 1")
+    m.release()
+    print(f"Lock M released, from thread 1")
+    
+    # perform class A operation
+    print(f"Aquiring Lock M for second time from thread 1")
+    m.acquire()
+    print(f"Lock M acquired, from thread 1")
+    A -= 1
+    if A == 0:
+        print(f"Releasing Lock L from thread 1")
+        l.release()
+        print(f"Lock L released from thread 1")
+    print(f"Lock L released, releasing M from thread 1")
+    m.release()
+    print(f"Finally Lock M released, from thread 1")
+
+def t2():
+    global B
+    print(f"Aqquiring Lock M from thread 2")
+    m.acquire()
+    print(f"Lock M acquired,from thread 2")
+    B += 1
+    if B == 1:        
+        print(f"Aqquiring Lock L from thread 2")
+        l.acquire()
+        print(f"Lock L acquired from thread 2")
+    print(f"Lock M acquired, releasing it from thread 2")
+    m.release()
+    print(f"Lock M released, from thread 2")
+    # perform class B operation
+    print(f"Aqquiring Lock M for second time from thread 2")
+    m.acquire()
+    print(f"Lock M acquired, from thread 2")
+    B -= 1
+    if B == 0:
+        print(f"Releasing Lock L from thread 2")
+        l.release()
+        print(f"Lock L released from thread 2")
+    print(f"Lock L released, releasing M from thread 2")
+    m.release()
+    print(f"Finally Lock M released, from thread 2")
+
+def t3():
+    pass  # Empty function in the original code
+
+def t4():
+    pass  # Empty function in the original code
+
+# if __name__ == "__main__":
+
+#     threads = [new_thread(task, args=(i+1,)) for i in range(3)]
+#     threads.append(new_thread(task_special2, args=(threads[2],)))
+#     threads.append(new_thread(task_special2, args=(threads[3],)))
     
 
-    for t in threads:
-        scheduler.register(t)
+#     for t in threads:
+#         scheduler.register(t)
         
 
+#     scheduler.start()
+
+
+
+
+
+
+def main():
+    # Create threads
+    a1 = new_thread(target=t1)
+    b1 = new_thread(target=t2)
+    a2 = new_thread(target=t3)
+    b2 = new_thread(target=t4)
+    
+    scheduler.register(a1)
+    scheduler.register(b1)
+    scheduler.register(a2)
+    scheduler.register(b2)
     scheduler.start()
+   
+if __name__ == "__main__":
+    main()
