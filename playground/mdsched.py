@@ -99,7 +99,6 @@ class ThreadWrapper(threading.Thread):
             try:
                 super().run()
             except AttributeError:
-                # If super().run() deletes attributes we need, restore them
                 if not hasattr(self, '_target'):
                     self._target = self._preserve_target
                 if not hasattr(self, '_args'):

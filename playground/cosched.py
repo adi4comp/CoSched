@@ -1,6 +1,7 @@
 import threading
 import random
 import time
+import sys
 from enum import Enum
 from greenlet import greenlet
 
@@ -26,12 +27,19 @@ class Scheduler:
         self.rlock_counter = {}
         self.debug = debug    
         self.greenlets = {} 
-        
+        self.policy = 1
         self.main_greenlet = greenlet(self._scheduler_loop)
+        self.schedule = []
+        self.thread_priority = {}
 
+    def set_policy(self, policy):
+        self.policy = policy    
+    def verbose(self):
+        self.debug = True
     def _scheduler_loop(self):
         while self.ready_queue:
             thread = self.pick_next_thread()
+            self.schedule.append(thread)
             if thread:
                 if self.state[thread] != ThreadState.BLOCKED:
                     self.state[thread] = ThreadState.RUNNING
@@ -54,28 +62,47 @@ class Scheduler:
             if self.state[t] != ThreadState.TERMINATED:
                 error.append(t)
 
+        print(f"[Scheduler Loop] Scheduled Picked This time: {'-> '.join([t.name for t in self.schedule])}")
         if error:
             raise RuntimeError(f"[Scheduler Loop] Error: Threads {', '.join([t.name for t in error])} are not terminated due to deadlock")
     def register(self, thread):
         self.threads.append(thread)
         self.ready_queue.append(thread)
         self.state[thread] = ThreadState.IDLE
+        self.thread_priority[thread] = 0
 
     def pick_next_thread(self):
-        # if self.ready_queue:
-        #     if self.debug:
-        #         print("Available threads:", ", ".join([f"{i}: {t.name}-{i+1}" for i, t in enumerate(self.ready_queue)]))
-        #     try:
-        #         index = int(input("Enter the next thread index to run: "))
-        #         return self.threads[index]
-        #     except (ValueError, IndexError):
-        #         print("Invalid index, enter again")
-        #         return self.pick_next_thread()
-        # return None
         if self.ready_queue:
             if self.debug:
                 print("Available threads:", ", ".join([f"{i}: {t.name}-{i+1}" for i, t in enumerate(self.ready_queue)]))
-            return random.choice(self.ready_queue)
+
+            match self.policy:
+                case 0:
+                    if self.ready_queue:
+                        if self.debug:
+                            print("Available threads:", ", ".join([f"{i}: {t.name}-{i+1}" for i, t in enumerate(self.ready_queue)]))
+                        try:
+                            index = int(input("Enter the next thread index to run: "))
+                            return self.threads[index]
+                        except (ValueError, IndexError):
+                            print("Invalid index, enter again")
+                            return self.pick_next_thread()
+                    return None
+                case 1:
+                    return random.choice(self.ready_queue)
+                case 2:
+                    last_thread = self.schedule[-1] if self.schedule else None
+                    if self.ready_queue:
+                        if last_thread:
+                            self.thread_priority[last_thread] -= 1
+                        max_priority = max(self.thread_priority.values())
+                        max_priority_threads = [t for t, p in self.thread_priority.items() if p == max_priority]
+                        return random.choice(max_priority_threads)
+                    else:
+                        return None
+                    
+                        
+                    
 
     def run(self, thread):
         if self.debug:
@@ -224,7 +251,7 @@ class Lock():
                 holder_thread = scheduler.lock_holder[self]
                 if scheduler.state[holder_thread] == ThreadState.TERMINATED:
                     scheduler.state[get_calling_thread] = ThreadState.TERMINATED
-                    raise RuntimeError(f"Thread {holder_thread.name} is terminated and didn't release the lock")
+                    raise RuntimeError(f"[Resource Starvation] Thread {holder_thread.name} is terminated and didn't release the lock")
                 
                 scheduler.lock_queue[self].append(calling_thread)
                 scheduler.main_greenlet.switch()
@@ -257,7 +284,7 @@ class Lock():
                 if next_thread not in scheduler.ready_queue:
                     scheduler.ready_queue.append(next_thread)
                 if scheduler.debug:
-                    print(f"[Release] Lock {self.name} released by {calling_thread.name}, waking up {next_thread.name}")
+                    print(f"[Release] Lock released by {calling_thread.name}, waking up {next_thread.name}")
             else:
                 if scheduler.debug:
                     print(f"[Release] Lock released by {calling_thread.name}, no threads waiting")
@@ -534,21 +561,10 @@ def new_thread(target, args=()):
     return t
 
 def task(id):   
-    print(f"Thread {id} is trying to acquire lock_1")
     lock_1.acquire()
-    print(f"Thread {id} will aqquire lock_1 again")
     lock_1.acquire()
-    print(f"Lock acquired, Thread {id} is going to sleep for 2 seconds")
-    time.sleep(2)
-    print(f"Thread {id} had a good sleep, now releasing lock_1")
+    time.sleep(1)
     lock_1.release()
-    print(f"Thread {id} will release lock_1 again")
-    lock_1.release()
-    print(f"Thread {id} will release lock_1 again")
-    lock_1.release()
-    print(f"Thread {id} will release lock_1 again")
-    lock_1.release()
-    print(f"Thread {id} has released lock_1")
 
 
 def task_special(thread):
@@ -557,14 +573,14 @@ def task_special(thread):
     print(f"Looks like {thread.name} is done")
 
 def task_special2(thread):
-    print(f"Trying to acquire lock_2")
+    # print(f"Trying to acquire lock_2")
     lock_2.acquire()
 
-    print(f"Lock acquired,We will wait for {thread.name} to finish")
+    # print(f"Lock acquired,We will wait for {thread.name} to finish")
     thread.join()
-    print(f"Looks like {thread.name} is done, now releasing lock_2")
+    # print(f"Looks like {thread.name} is done, now releasing lock_2")
     lock_2.release()
-    print(f"Lock released")
+    # print(f"Lock released")
 
 start_time = time.time()
 
@@ -585,80 +601,36 @@ B = 0
 
 def t1():
     global A
-    print(f"Aqquiring Lock M from thread 1")
     m.acquire()
-    print(f"Lock M acquired, from thread 1")
     A += 1
     if A == 1:
-        print(f"Aqquiring Lock L from thread 1")
         l.acquire()
-        print(f"Lock L acquired from thread 1")
-    print(f"Lock M acquired, releasing it from thread 1")
-    m.release()
-    print(f"Lock M released, from thread 1")
-    
-    # perform class A operation
-    print(f"Aquiring Lock M for second time from thread 1")
+    m.release()    
     m.acquire()
-    print(f"Lock M acquired, from thread 1")
     A -= 1
     if A == 0:
-        print(f"Releasing Lock L from thread 1")
         l.release()
-        print(f"Lock L released from thread 1")
-    print(f"Lock L released, releasing M from thread 1")
     m.release()
-    print(f"Finally Lock M released, from thread 1")
+    
 
 def t2():
     global B
-    print(f"Aqquiring Lock M from thread 2")
     m.acquire()
-    print(f"Lock M acquired,from thread 2")
     B += 1
     if B == 1:        
-        print(f"Aqquiring Lock L from thread 2")
         l.acquire()
-        print(f"Lock L acquired from thread 2")
-    print(f"Lock M acquired, releasing it from thread 2")
     m.release()
-    print(f"Lock M released, from thread 2")
-    # perform class B operation
-    print(f"Aqquiring Lock M for second time from thread 2")
     m.acquire()
-    print(f"Lock M acquired, from thread 2")
     B -= 1
     if B == 0:
-        print(f"Releasing Lock L from thread 2")
         l.release()
-        print(f"Lock L released from thread 2")
-    print(f"Lock L released, releasing M from thread 2")
     m.release()
-    print(f"Finally Lock M released, from thread 2")
 
 def t3():
     pass  # Empty function in the original code
 
 def t4():
     pass  # Empty function in the original code
-
-# if __name__ == "__main__":
-
-#     threads = [new_thread(task, args=(i+1,)) for i in range(3)]
-#     threads.append(new_thread(task_special2, args=(threads[2],)))
-#     threads.append(new_thread(task_special2, args=(threads[3],)))
-    
-
-#     for t in threads:
-#         scheduler.register(t)
-        
-
-#     scheduler.start()
-
-
-
-
-
 
 def main():
     # Create threads
@@ -671,7 +643,38 @@ def main():
     scheduler.register(b1)
     scheduler.register(a2)
     scheduler.register(b2)
-    scheduler.start()
-   
+    # scheduler.start()
+
 if __name__ == "__main__":
-    main()
+
+
+    if __name__ == "__main__":
+        if "--verbose" in sys.argv:
+            scheduler.verbose()
+        if "--interactive" in sys.argv:
+            print("Interactive policy selected")
+            scheduler.set_policy(0)
+        elif "--priority" in sys.argv:
+            print("Priority policy selected")
+            scheduler.set_policy(2)
+        else:
+            print("Random policy selected")
+            scheduler.set_policy(1)
+        if "--benchmark" in sys.argv:
+            main()
+        else:
+            threads = [new_thread(task, args=(i+1,)) for i in range(3)]
+            # threads.append(new_thread(task_special2, args=(threads[2],)))
+            # threads.append(new_thread(task_special2, args=(threads[3],)))
+            for t in threads:
+                scheduler.register(t)
+    
+    scheduler.start()
+
+
+
+
+
+
+
+   
