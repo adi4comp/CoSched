@@ -21,16 +21,18 @@ class Scheduler:
         self.ready_queue = []
         self.state = {}
         self.wait_join = {}
-        self.lock_state = {}
-        self.lock_holder = {}
-        self.lock_queue = {}
-        self.rlock_counter = {}
         self.debug = debug    
         self.greenlets = {} 
         self.policy = 1
         self.main_greenlet = greenlet(self._scheduler_loop)
         self.schedule = []
         self.thread_priority = {}
+        self.locks = []
+        self.rlocks = []
+        self.semaphores = []
+        self.condition = []
+        self.barriers = []
+        self.events = []
 
     def set_policy(self, policy):
         self.policy = policy    
@@ -116,9 +118,6 @@ class Scheduler:
     
         self.main_greenlet.switch()
             
-    def register_lock(self, lock):
-        self.lock_holder[lock] = None
-        self.lock_queue[lock] = []
     
     def preempt_thread(self, thread):
         if thread not in self.greenlets:
@@ -160,6 +159,23 @@ class Scheduler:
             print(f"[Scheduler Info] Returned from {thread.name} at {get_time()}")
 
 
+
+scheduler = Scheduler(debug=False)
+
+def get_time():
+    return time.time()
+
+def set_policy(policy):
+    if policy in [0, 1, 2]:
+        scheduler.set_policy(policy)
+    else:
+        raise ValueError("Invalid policy. Choose 0 (manual), 1 (random), or 2 (priority).")
+    
+def set_verbose():
+    scheduler.verbose()
+
+
+
 def get_calling_thread():
     for t in scheduler.threads:
         if scheduler.state[t] == ThreadState.RUNNING:
@@ -170,9 +186,10 @@ def get_calling_thread():
     return None
 
 
-class ThreadWrapper(threading.Thread):
+class Thread(threading.Thread):
     def __init__(self, target=None, args=()):
         super().__init__(target=target, args=args)
+        scheduler.register(self)
         self._preserve_target = self._target
         self._preserve_args = self._args
         self._preserve_kwargs = self._kwargs
@@ -216,6 +233,7 @@ class ThreadWrapper(threading.Thread):
                 scheduler.ready_queue.remove(calling_thread)
         
         else:
+            scheduler.wait_join[self] = None
             scheduler.state[calling_thread] = ThreadState.IDLE    
         if scheduler.debug:
             print(f"[Join] Preempting Thread {calling_thread.name} for {self.name} to finish")
@@ -230,40 +248,39 @@ class ThreadWrapper(threading.Thread):
 class Lock():
     def __init__(self):
         self.locked = False
-        scheduler.register_lock(self)
+        scheduler.locks.append(self)
+        self.queue = []
+        self.lock_holder = None
         
     def acquire(self, blocking=True, timeout=-1):
         if blocking:
-            if not self.locked and scheduler.lock_holder[self] == None:
+            if not self.locked and self.lock_holder == None:
                 self.locked = True
-                scheduler.lock_holder[self] = get_calling_thread()
+                self.lock_holder = get_calling_thread()
                 scheduler.state[get_calling_thread()] = ThreadState.IDLE
                 scheduler.main_greenlet.switch()
                 return True
             else:
                 if scheduler.debug:
-                    print(f"[Acquire] Lock is already held by {scheduler.lock_holder[self]}")
+                    print(f"[Acquire] Lock is already held by {self.lock_holder}")
                 calling_thread = get_calling_thread()
                 scheduler.state[calling_thread] = ThreadState.BLOCKED
                 if calling_thread in scheduler.ready_queue:
                     scheduler.ready_queue.remove(calling_thread)
                     
-                holder_thread = scheduler.lock_holder[self]
+                holder_thread = self.lock_holder
                 if scheduler.state[holder_thread] == ThreadState.TERMINATED:
                     scheduler.state[get_calling_thread] = ThreadState.TERMINATED
                     raise RuntimeError(f"[Resource Starvation] Thread {holder_thread.name} is terminated and didn't release the lock")
                 
-                scheduler.lock_queue[self].append(calling_thread)
+                self.queue.append(calling_thread)
                 scheduler.main_greenlet.switch()
                 self.acquire(blocking, timeout)
                 
-            
-            
-                
         else:
-            if not self.locked and scheduler.lock_holder[self] == None:
+            if not self.locked and self.lock_holder == None:
                 self.locked = True
-                scheduler.lock_holder[self] = get_calling_thread()
+                self.lock_holder = get_calling_thread()
                 scheduler.main_greenlet.switch()
                 return True
             else:
@@ -272,14 +289,14 @@ class Lock():
                 
     def release(self):
         calling_thread = get_calling_thread()
-        if self.locked and scheduler.lock_holder[self] == get_calling_thread():
+        if self.locked and self.lock_holder == get_calling_thread():
             self.locked = False
-            scheduler.lock_holder[self] = None
+            self.lock_holder = None
             scheduler.state[calling_thread] = ThreadState.IDLE
             if calling_thread not in scheduler.ready_queue:
                 scheduler.ready_queue.append(calling_thread)
-            if scheduler.lock_queue[self]:
-                next_thread = scheduler.lock_queue[self].pop(0)
+            if self.queue:
+                next_thread = self.queue.pop(0)
                 scheduler.state[next_thread] = ThreadState.IDLE
                 if next_thread not in scheduler.ready_queue:
                     scheduler.ready_queue.append(next_thread)
@@ -289,9 +306,9 @@ class Lock():
                 if scheduler.debug:
                     print(f"[Release] Lock released by {calling_thread.name}, no threads waiting")
 
-        elif self.locked and scheduler.lock_holder[self] != get_calling_thread():
+        elif self.locked and self.lock_holder != get_calling_thread():
             scheduler.state[get_calling_thread] = ThreadState.TERMINATED
-            raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {calling_thread.name}")
+            raise RuntimeError(f"Cannot release a lock that is not held (held by {self.lock_holder}) by the calling thread {calling_thread.name}")
         
         elif not self.locked:
             scheduler.state[get_calling_thread] = ThreadState.TERMINATED
@@ -304,30 +321,39 @@ class Lock():
             return True
         else:   
             return False
+            
+    def __enter__(self):
+        self.acquire()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 
 class RLock(Lock):
     def __init__(self):
         super().__init__()
-        scheduler.rlock_counter[self] = 0
-        
+        self.rlock_counter = 0
+        scheduler.rlocks.append(self)
+        if self in scheduler.locks:
+            scheduler.locks.remove(self)
     def acquire(self, blocking=True, timeout=-1):
-        if scheduler.rlock_counter[self]==0:
-            scheduler.rlock_counter[self] = 1
-        if self.locked and scheduler.lock_holder[self] == get_calling_thread():
-            scheduler.rlock_counter[self] += 1
+        if self.rlock_counter==0:
+            self.rlock_counter = 1
+        if self.locked and self.lock_holder == get_calling_thread():
+            self.rlock_counter += 1
             scheduler.main_greenlet.switch()
             return True
         else:
             return super().acquire(blocking, timeout)
             
     def release(self):
-        if self.locked and scheduler.lock_holder[self] == get_calling_thread():
-            scheduler.rlock_counter[self] -= 1
-            if scheduler.rlock_counter[self] == 0:
+        if self.locked and self.lock_holder == get_calling_thread():
+            self.rlock_counter -= 1
+            if self.rlock_counter == 0:
                 super().release()
         else:
-            raise RuntimeError(f"Cannot release a lock that is not held (held by {scheduler.lock_holder[self]}) by the calling thread {get_calling_thread().name}")
+            raise RuntimeError(f"Cannot release a lock that is not held (held by {self.lock_holder}) by the calling thread {get_calling_thread().name}")
         scheduler.main_greenlet.switch()
         
 
@@ -339,9 +365,9 @@ class RLock(Lock):
 class Semaphore():
     def __init__(self, value=1):
         self.value = value
-        self.lock = threading.Lock()
         # scheduler.register_semaphore(self)
         self.queue = []
+        scheduler.semaphores.append(self)
 
     def acquire(self, blocking=True, timeout=-1):
         calling_thread=get_calling_thread()
@@ -382,6 +408,13 @@ class Semaphore():
         scheduler.main_greenlet.switch()
         return True
     
+    # Add context manager support
+    def __enter__(self):
+        self.acquire()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 class BoundedSemaphore(Semaphore):
     def __init__(self, value=1):
@@ -398,7 +431,9 @@ class Condition():
     def __init__(self, lock=None):
         self.lock = lock if lock else RLock()
         self.blocked = []
-
+        scheduler.condition.append(self)
+        if self.lock in scheduler.locks:
+            scheduler.locks.remove(self.lock)
     def acquire(self, blocking=True, timeout=-1):
         return self.lock.acquire(blocking, timeout)
     def release(self):
@@ -450,11 +485,19 @@ class Condition():
     def notify_all(self):
         n_thread = len(self.blocked)
         self.notify(n_thread)
+        
+    def __enter__(self):
+        self.acquire()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 class Event():
     def __init__(self):
         self._flag = False
-    
+        scheduler.events.append(self)
+
     def wait(self):
         if self._flag:
             calling_thread = get_calling_thread()
@@ -503,6 +546,7 @@ class Barrier():
         self.timeout = timeout
         self.blocked = []
         self.aborted = False
+        scheduler.barriers.append(self)
 
     def wait(self):
             
@@ -553,128 +597,12 @@ class Barrier():
     def broken(self):
         return self.aborted
 
-        
 
-def new_thread(target, args=()):
-    t = ThreadWrapper(target=target, args=args)
-    # t.name = f"T-{len(scheduler.threads)+1}"
-    return t
-
-def task(id):   
-    lock_1.acquire()
-    lock_1.acquire()
-    time.sleep(1)
-    lock_1.release()
-
-
-def task_special(thread):
-    print(f"We will wait for {thread.name}")
-    thread.join()
-    print(f"Looks like {thread.name} is done")
-
-def task_special2(thread):
-    # print(f"Trying to acquire lock_2")
-    lock_2.acquire()
-
-    # print(f"Lock acquired,We will wait for {thread.name} to finish")
-    thread.join()
-    # print(f"Looks like {thread.name} is done, now releasing lock_2")
-    lock_2.release()
-    # print(f"Lock released")
-
-start_time = time.time()
-
-def get_time():
-    return (time.time() - start_time)
-
-
-scheduler = Scheduler(debug=False)
-lock_1 = RLock()
-lock_2 = Lock()
-
-
-# Global variables
-m = Lock()
-l = Lock()
-A = 0
-B = 0
-
-def t1():
-    global A
-    m.acquire()
-    A += 1
-    if A == 1:
-        l.acquire()
-    m.release()    
-    m.acquire()
-    A -= 1
-    if A == 0:
-        l.release()
-    m.release()
-    
-
-def t2():
-    global B
-    m.acquire()
-    B += 1
-    if B == 1:        
-        l.acquire()
-    m.release()
-    m.acquire()
-    B -= 1
-    if B == 0:
-        l.release()
-    m.release()
-
-def t3():
-    pass  # Empty function in the original code
-
-def t4():
-    pass  # Empty function in the original code
-
-def main():
-    # Create threads
-    a1 = new_thread(target=t1)
-    b1 = new_thread(target=t2)
-    a2 = new_thread(target=t3)
-    b2 = new_thread(target=t4)
-    
-    scheduler.register(a1)
-    scheduler.register(b1)
-    scheduler.register(a2)
-    scheduler.register(b2)
-    # scheduler.start()
-
-if __name__ == "__main__":
-
-
-    if __name__ == "__main__":
-        if "--verbose" in sys.argv:
-            scheduler.verbose()
-        if "--interactive" in sys.argv:
-            print("Interactive policy selected")
-            scheduler.set_policy(0)
-        elif "--priority" in sys.argv:
-            print("Priority policy selected")
-            scheduler.set_policy(2)
-        else:
-            print("Random policy selected")
-            scheduler.set_policy(1)
-        if "--benchmark" in sys.argv:
-            main()
-        else:
-            threads = [new_thread(task, args=(i+1,)) for i in range(3)]
-            # threads.append(new_thread(task_special2, args=(threads[2],)))
-            # threads.append(new_thread(task_special2, args=(threads[3],)))
-            for t in threads:
-                scheduler.register(t)
-    
+def cosched_start():
     scheduler.start()
 
 
-
-
-
-
-
-   
+__all__ = [
+    'Thread', 'Lock', 'RLock', 'Semaphore', 'BoundedSemaphore',
+    'Condition', 'Event', 'Barrier', 'set_policy', 'set_verbose', 'cosched_start'
+]
