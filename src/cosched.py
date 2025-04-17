@@ -20,7 +20,6 @@ class Scheduler:
         self.threads = [] 
         self.ready_queue = []
         self.state = {}
-        self.wait_join = {}
         self.debug = debug    
         self.greenlets = {} 
         self.policy = 1
@@ -140,27 +139,41 @@ class Scheduler:
     def check_deadlock(self):
         deadlock_dependency_tree = {}
         for t in self.threads:
+            deadlock_dependency_tree[t] = None
             if self.state[t] == ThreadState.BLOCKED:
                 for l in self.locks:
                     if t in l.queue:
                         if self.state[l.lock_holder] == ThreadState.BLOCKED:
                             deadlock_dependency_tree[t] = l.lock_holder
-                    else:
-                        for r in self.rlocks:
-                            if t in r.queue:
-                                if self.state[r.lock_holder] == ThreadState.BLOCKED:
-                                    deadlock_dependency_tree[t] = r.lock_holder
-                                else:
-                                    for c in self.condition:
-                                        if t in c.blocked:
-                                                if self.state[c.lock.lock_holder] == ThreadState.BLOCKED:
-                                                    deadlock_dependency_tree[t] = c.lock.lock_holder
+                if deadlock_dependency_tree[t] == None:
+                    for r in self.rlocks:
+                        if t in r.queue:
+                            if self.state[r.lock_holder] == ThreadState.BLOCKED:
+                                deadlock_dependency_tree[t] = r.lock_holder
+                if deadlock_dependency_tree[t] == None:
+                    for c in self.condition:
+                        if t in c.blocked:
+                            if self.state[c.lock.lock_holder] == ThreadState.BLOCKED:
+                                deadlock_dependency_tree[t] = c.lock.lock_holder
+                if deadlock_dependency_tree[t] == None:
+                    for s in scheduler.threads:
+                        if t in s.wait_join:
+                            if self.state[s] == ThreadState.BLOCKED:
+                                deadlock_dependency_tree[t] = s
 
-        if deadlock_dependency_tree:
+
+        flag = False
+        for t in self.threads:
+            if deadlock_dependency_tree[t] != None:
+                flag = True 
+                break
+        
+        if flag:
             self.error += 1
             print("\nError {}: [Deadlock] Deadlock Detected:".format(self.error))
             for parent, child in deadlock_dependency_tree.items():
-                print(f"{parent.name} -> {child.name}")
+                if parent!= None and child != None:
+                    print(f"{parent.name} -> {child.name}")
 
     
                                                     
@@ -238,13 +251,13 @@ class Scheduler:
                     if self.debug:
                         print(f"[Greenlet] Thread {thread.name} completed execution")
                     self.state[thread] = ThreadState.TERMINATED
-                    if thread in self.wait_join:
-                        self.state[self.wait_join[thread]] = ThreadState.IDLE
-                        if self.wait_join[thread] not in self.ready_queue:
-                            self.ready_queue.append(self.wait_join[thread])
+                    if thread.wait_join:
+                        for x in thread.wait_join:
+                            self.state[x] = ThreadState.IDLE
+                            if x not in self.ready_queue:
+                                self.ready_queue.append(x)
                     if thread in self.ready_queue:
                         self.ready_queue.remove(thread)
-                    
                     self.main_greenlet.switch()
             
             self.greenlets[thread] = greenlet(thread_runner, parent=self.main_greenlet)
@@ -295,7 +308,7 @@ class Thread(threading.Thread):
         self._preserve_target = self._target
         self._preserve_args = self._args
         self._preserve_kwargs = self._kwargs
-
+        self.wait_join = []
     def start(self):
         scheduler.register(self)
         
@@ -324,25 +337,28 @@ class Thread(threading.Thread):
     def join(self, timeout=None):
         
         calling_thread = get_calling_thread()
-        
+        if scheduler.debug:
+            print(f"[Join] Preempting Thread {calling_thread.name} for {self.name} to finish")
         if scheduler.state[self] != ThreadState.TERMINATED:
-            scheduler.wait_join[self] = calling_thread
-            # if scheduler.debug:
-            print(f"[Join] Thread {calling_thread.name} is waiting for {self.name}")
-            
+            self.wait_join.append(calling_thread)
             scheduler.state[calling_thread] = ThreadState.BLOCKED
             if calling_thread in scheduler.ready_queue:
                 scheduler.ready_queue.remove(calling_thread)
-        
+            scheduler.main_greenlet.switch()
+            
+
         else:
-            scheduler.wait_join[self] = None
-            scheduler.state[calling_thread] = ThreadState.IDLE    
-        if scheduler.debug:
-            print(f"[Join] Preempting Thread {calling_thread.name} for {self.name} to finish")
-        scheduler.main_greenlet.switch()
-        if scheduler.debug:
-            print(f"[Join] Thread {calling_thread.name} resumed after {self.name} completion")
+            if scheduler.debug:
+                print(f"[Join] Thread {calling_thread.name} resumed after {self.name} completion")
+            for t in self.wait_join:
+                scheduler.state[t] = ThreadState.IDLE
+                if t not in scheduler.ready_queue:
+                    scheduler.ready_queue.append(t)
+            scheduler.main_greenlet.switch()
+
         return True
+                
+        
         
             
 
