@@ -11,15 +11,7 @@ def new_thread(target, args=()):
     t = Thread(target=target, args=args)
     return t
 
-def task(id):   
-    rlock_1.acquire()
-    print(f"Thread {id} acquired lock 1 times")
-    rlock_1.acquire()
-    print(f"Thread {id} acquired lock 2 times")
-    time.sleep(1)
-    print(f"Thread {id} releasing lock 1 times")
-    rlock_1.release()
-    print(f"Thread {id} is terminating")
+
 
 
 def task_special(thread):
