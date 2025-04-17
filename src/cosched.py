@@ -33,6 +33,7 @@ class Scheduler:
         self.condition = []
         self.barriers = []
         self.events = []
+        self.error = 0
 
     def set_policy(self, policy):
         self.policy = policy    
@@ -64,12 +65,17 @@ class Scheduler:
         #     if self.state[t] != ThreadState.TERMINATED:
         #         error.append(t)
 
+        print("\n\n-------[Scheduler Summary] All threads have finished execution-------\n")
         try:
             self.check_resource_starvation()
         except RuntimeError as e:
             print(e)
         
-        print(f"[Scheduler Loop] Scheduled Picked This time: {'-> '.join([t.name for t in self.schedule])}")
+        print(f"\n[Scheduler Schedule] Scheduled Picked This time: {'-> '.join([t.name for t in self.schedule])}\n")
+        if self.error > 0:
+            print(f"\n[Scheduler Summary] There is/are {self.error} error in the above interleaving\n")
+
+        print("\n-------------[Scheduler Summary] End of Scheduler Summary------------")
         # if error:
         #     raise RuntimeError(f"[Scheduler Loop] Error: Threads {', '.join([t.name for t in error])} are not terminated due to deadlock")
     def check_resource_starvation(self):
@@ -80,14 +86,18 @@ class Scheduler:
                     for x in self.queue:
                         if self.state[x] != ThreadState.TERMINATED:
                             error.append(x)
-                    raise RuntimeError(f"[Resource Starvation] Thread {l.lock_holder.name} is terminated and didn't release the lock which starved {', '.join([t.name for t in error])} threads")
+                    if error:
+                        self.error += 1
+                        raise RuntimeError(f"\nError {self.error}: [Resource Starvation]<Lock> Thread {l.lock_holder.name} is terminated and didn't release the lock which starved {', '.join([t.name for t in error])}\n")
         for s in self.semaphores:
             if s.value == 0:
                 error = []
                 for x in s.queue:
                     if self.state[x] != ThreadState.TERMINATED:
                         error.append(x)
-                raise RuntimeError(f"[Resource Starvation] Semaphore {s} is terminated and didn't release the semaphore which starved {', '.join([t.name for t in error])} threads")
+            if error:
+                self.error += 1
+                raise RuntimeError(f"\nError {self.error}: [Resource Starvation] <Semaphore> Threads {', '.join([t.name for t in error])} starved for Semaphore {self.semaphores.index(s)}\n")
         for r in self.rlocks:
             if r.locked == True:
                 if (self.state[r.lock_holder] == ThreadState.TERMINATED):
@@ -95,7 +105,9 @@ class Scheduler:
                     for x in r.queue:
                         if self.state[x] != ThreadState.TERMINATED:
                             error.append(x)
-                    raise RuntimeError(f"[Resource Starvation] RLock {r.lock_holder} is terminated and didn't release the lock ({r.rlock_counter} times) which starved {', '.join([t.name for t in error])} threads")
+                    if error:
+                        self.error += 1
+                        raise RuntimeError(f"\nError {self.error}: [Resource Starvation] <RLock> {r.lock_holder} is terminated and didn't release the lock ({r.rlock_counter} times) which starved {', '.join([t.name for t in error])} threads\n")
         for c in self.condition:
             if c.lock.locked == True:
                 if (self.state[c.lock.lock_holder] == ThreadState.TERMINATED):
@@ -103,14 +115,18 @@ class Scheduler:
                     for x in c.blocked:
                         if self.state[x] != ThreadState.TERMINATED:
                             error.append(x)
-                    raise RuntimeError(f"[Resource Starvation] Thread {c.lock.lock_holder} is terminated and didn't release the condition lock which starved {', '.join([t.name for t in error])} threads")
+                    if error:
+                        self.error += 1
+                        raise RuntimeError(f"\nError {self.error}: [Resource Starvation] Thread {c.lock.lock_holder} is terminated and didn't release the condition lock which starved {', '.join([t.name for t in error])} \n")
         for b in self.barriers:
             if b.blocked and b.aborted == False:
                     error = []
                     for x in b.blocked:
                         if self.state[x] != ThreadState.TERMINATED:
                             error.append(x)
-                    raise RuntimeError(f"[Resource Starvation] Barrier {b} couldnt be unblocked which starved {', '.join([t.name for t in error])} threads")
+                    if error:
+                        self.error += 1
+                        raise RuntimeError(f"\nError {self.error}: [Resource Starvation] Barrier {b} couldnt be unblocked which starved {', '.join([t.name for t in error])} \n")
             
         for e in self.events:
             if e._flag == False:
@@ -118,7 +134,9 @@ class Scheduler:
                 for x in e.blocked:
                     if self.state[x] != ThreadState.TERMINATED:
                         error.append(x)
-                raise RuntimeError(f"[Resource Starvation] Event {e} didn't happen which starved {', '.join([t.name for t in error])} threads")
+                if error:
+                    self.error += 1
+                    raise RuntimeError(f"\nError {self.error}: [Resource Starvation] Event {e} didn't happen which starved {', '.join([t.name for t in error])} threads")
         
     def register(self, thread):
         self.threads.append(thread)
@@ -323,10 +341,14 @@ class Lock():
                     
                 holder_thread = self.lock_holder
                 if scheduler.state[holder_thread] == ThreadState.TERMINATED:
-                    scheduler.state[get_calling_thread] = ThreadState.TERMINATED
-                    raise RuntimeError(f"[Resource Starvation] Thread {holder_thread.name} is terminated and didn't release the lock which starved {calling_thread.name} thread")
+                    scheduler.state[calling_thread] = ThreadState.BLOCKED
+                    self.queue.append(calling_thread)
+                    if calling_thread in scheduler.ready_queue:
+                        scheduler.ready_queue.remove(calling_thread)
+                    scheduler.main_greenlet.switch()
                 
-                self.queue.append(calling_thread)
+                if calling_thread not in self.queue:
+                    self.queue.append(calling_thread)
                 scheduler.main_greenlet.switch()
                 self.acquire(blocking, timeout)
                 
