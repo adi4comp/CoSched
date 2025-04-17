@@ -68,6 +68,7 @@ class Scheduler:
         print("\n\n-------[Scheduler Summary] All threads have finished execution-------\n")
         try:
             self.check_resource_starvation()
+            self.check_deadlock()
         except RuntimeError as e:
             print(e)
         
@@ -137,6 +138,38 @@ class Scheduler:
                 if error:
                     self.error += 1
                     raise RuntimeError(f"\nError {self.error}: [Resource Starvation] Event {e} didn't happen which starved {', '.join([t.name for t in error])} threads")
+
+    def check_deadlock(self):
+        deadlock_dependency_tree = {}
+        for t in self.threads:
+            if self.state[t] == ThreadState.BLOCKED:
+                for l in self.locks:
+                    if t in l.queue:
+                        if self.state[l.lock_holder] == ThreadState.BLOCKED:
+                            deadlock_dependency_tree[t] = l.lock_holder
+                    else:
+                        for r in self.rlocks:
+                            if t in r.queue:
+                                if self.state[r.lock_holder] == ThreadState.BLOCKED:
+                                    deadlock_dependency_tree[t] = r.lock_holder
+                                else:
+                                    for c in self.condition:
+                                        if t in c.blocked:
+                                                if self.state[c.lock.lock_holder] == ThreadState.BLOCKED:
+                                                    deadlock_dependency_tree[t] = c.lock.lock_holder
+
+        if deadlock_dependency_tree:
+            self.error += 1
+            print("\nError {}: [Deadlock] Deadlock Detected:".format(self.error))
+            for parent, child in deadlock_dependency_tree.items():
+                print(f"{parent.name} -> {child.name}")
+
+    
+                                                    
+                
+                        
+            
+
         
     def register(self, thread):
         self.threads.append(thread)
