@@ -77,8 +77,6 @@ class Scheduler:
             print(f"\n[Scheduler Summary] There is/are {self.error} error in the above interleaving\n")
 
         print("\n-------------[Scheduler Summary] End of Scheduler Summary------------")
-        # if error:
-        #     raise RuntimeError(f"[Scheduler Loop] Error: Threads {', '.join([t.name for t in error])} are not terminated due to deadlock")
     def check_resource_starvation(self):
         for l in self.locks:
             if l.locked == True:
@@ -96,9 +94,9 @@ class Scheduler:
                 for x in s.queue:
                     if self.state[x] != ThreadState.TERMINATED:
                         error.append(x)
-            if error:
-                self.error += 1
-                raise RuntimeError(f"\nError {self.error}: [Resource Starvation] <Semaphore> Threads {', '.join([t.name for t in error])} starved for Semaphore {self.semaphores.index(s)}\n")
+                if error:
+                    self.error += 1
+                    raise RuntimeError(f"\nError {self.error}: [Resource Starvation] <Semaphore> Threads {', '.join([t.name for t in error])} starved for Semaphore {self.semaphores.index(s)}\n")
         for r in self.rlocks:
             if r.locked == True:
                 if (self.state[r.lock_holder] == ThreadState.TERMINATED):
@@ -269,13 +267,13 @@ scheduler = Scheduler(debug=False)
 def get_time():
     return time.time()
 
-def set_policy(policy):
+def cosched_set_policy(policy):
     if policy in [0, 1, 2]:
         scheduler.set_policy(policy)
     else:
         raise ValueError("Invalid policy. Choose 0 (manual), 1 (random), or 2 (priority).")
     
-def set_verbose():
+def cosched_set_verbose():
     scheduler.verbose()
 
 
@@ -496,7 +494,8 @@ class Semaphore():
                 if scheduler.debug:
                     print(f"[Acquire] Semaphore is not available, blocking thread {calling_thread.name}")
                 scheduler.state[calling_thread] = ThreadState.BLOCKED
-                self.queue.append(calling_thread)
+                if calling_thread not in self.queue:
+                    self.queue.append(calling_thread)
                 if calling_thread in scheduler.ready_queue:
                     scheduler.ready_queue.remove(calling_thread)
                 
@@ -716,5 +715,5 @@ def cosched_start():
 
 __all__ = [
     'Thread', 'Lock', 'RLock', 'Semaphore', 'BoundedSemaphore',
-    'Condition', 'Event', 'Barrier', 'set_policy', 'set_verbose', 'cosched_start'
+    'Condition', 'Event', 'Barrier', 'cosched_set_policy', 'cosched_set_verbose', 'cosched_start'
 ]

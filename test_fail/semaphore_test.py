@@ -1,20 +1,17 @@
-import sys
 import cosched as threading
 from cosched import *
 import time
+import sys
 
 
-rlock_1 = RLock()
+s1 = Semaphore(0)
 
-def task(id):   
-    rlock_1.acquire()
-    print(f"Thread {id} acquired lock 1 times")
-    rlock_1.acquire()
-    print(f"Thread {id} acquired lock 2 times")
-    time.sleep(1)
-    print(f"Thread {id} releasing lock 1 times")
-    rlock_1.release()
-    print(f"Thread {id} is terminating")
+def task(id):
+    s1.acquire()
+
+def task_2(id):
+    s1.release()
+
 
 
 
@@ -33,10 +30,6 @@ if __name__ == "__main__":
     
     
     threads = [Thread(target=task, args=(i+1,)) for i in range(3)]
+    threads.append(Thread(target=task_2, args=(4,)))
     
     cosched_start()
-
-
-    
-
-

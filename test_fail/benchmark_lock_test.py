@@ -1,6 +1,7 @@
 import sys
 import cosched as threading
 from cosched import *
+
 m = Lock()
 l = Lock()
 A = 0
@@ -47,16 +48,16 @@ def main():
 
 if __name__ == "__main__":
     if "--verbose" in sys.argv:
-            set_verbose()
-            if "--interactive" in sys.argv:
-                print("Interactive policy selected")
-                set_policy(0)
-            elif "--priority" in sys.argv:
-                print("Priority policy selected")
-                set_policy(2)
-            else:
-                print("Random policy selected")
-                set_policy(1)
+        cosched_set_verbose()
+    if "--interactive" in sys.argv:
+        print("Interactive policy selected")
+        cosched_set_policy(0)
+    elif "--priority" in sys.argv:
+        print("Priority policy selected")
+        cosched_set_policy(2)
+    else:
+        print("Random policy selected")
+        cosched_set_policy(1)
     
     main()
     cosched_start()
