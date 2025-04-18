@@ -81,7 +81,7 @@ class Scheduler:
             if l.locked == True:
                 if(self.state[l.lock_holder] == ThreadState.TERMINATED):
                     error = []
-                    for x in self.queue:
+                    for x in l.queue:
                         if self.state[x] != ThreadState.TERMINATED:
                             error.append(x)
                     if error:
