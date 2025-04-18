@@ -1,2 +1,4 @@
 cpython
 __pycache__
+logs
+*.log
