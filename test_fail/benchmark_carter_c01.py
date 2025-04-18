@@ -1,3 +1,4 @@
+# Possible Deadlock: example from benchmark (python translation of https://github.com/wcventure/PERIOD/blob/main/evaluation/CS/carter01/carter01_bad.c)
 import sys
 import cosched as threading
 from cosched import *
