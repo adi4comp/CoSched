@@ -246,6 +246,7 @@ class Scheduler:
                         thread.run()
                 except Exception as e:
                     self.state[thread] = ThreadState.TERMINATED
+                    self.error += 1
                     print(f"[ERROR] Exception in thread {thread.name}: {e}")
                 finally:
                     if self.debug:
