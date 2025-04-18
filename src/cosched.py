@@ -184,7 +184,8 @@ class Scheduler:
         
     def register(self, thread):
         self.threads.append(thread)
-        self.ready_queue.append(thread)
+        if thread not in self.ready_queue:
+            self.ready_queue.append(thread)
         self.state[thread] = ThreadState.IDLE
         self.thread_priority[thread] = 0
 
@@ -311,7 +312,9 @@ class Thread(threading.Thread):
         self._preserve_kwargs = self._kwargs
         self.wait_join = []
     def start(self):
-        scheduler.register(self)
+        if scheduler.debug:
+            print(f"Thread is queued for execution :{self.name}")
+        pass
         
     def run(self):
         if scheduler.state[self] == ThreadState.RUNNING:
