@@ -27,7 +27,8 @@ done
 if [ -z "$policy" ]; then
     policy="random"
 fi
-if [-z "$iterations"]; then
+
+if [ -z "$iterations"]; then
     iterations=1
 fi
 
@@ -52,9 +53,9 @@ for test_file in *.py; do
     error_count=$(grep -c "There is/are [0-9]\+ error in the above interleaving" logs/${test_file}.log)
     if [ "$error_count" -gt 0 ]; then
         echo ""
-        echo "[Tests Summary]There is/are $error_count/$iterations schedules with error in the generated interleavings (Check the error log)"
+        echo "[Tests Summary] There is/are $error_count/$iterations schedules with error in the generated interleavings (Check the error log)"
         echo "" >> logs/${test_file}.log
-        echo "There is/are $error_count/$iterations schedules with error in the generated interleavings" >> logs/${test_file}.log
+        echo "[Tests Summary] There is/are $error_count/$iterations schedules with error in the generated interleavings" >> logs/${test_file}.log
     else
         echo ""
         echo "No errors found in the $iterations generated interleavings"

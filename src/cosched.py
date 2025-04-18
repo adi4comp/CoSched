@@ -12,7 +12,8 @@ class ThreadState(Enum):
     TERMINATED = 3
 
 
-random.seed(time.time())
+used_seed = time.time()
+random.seed(used_seed)
 
 class Scheduler:
     def __init__(self, debug=False):
@@ -65,6 +66,7 @@ class Scheduler:
         #         error.append(t)
 
         print("\n\n-------[Scheduler Summary] All threads have finished execution-------\n")
+        print(f"\nSeed used: {used_seed}\n")
         try:
             self.check_resource_starvation()
             self.check_deadlock()
