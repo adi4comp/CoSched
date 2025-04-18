@@ -6,6 +6,12 @@
 
 ## Getting Started
 
+0. Clone the repository
+
+```bash
+git clone  https://github.com/adi4comp/CoSched.git
+```
+
 1. To do the env setup  all u need is python and greenlet library. However u can use the `setup.sh` script to automate this.
 
 ```bash
@@ -82,6 +88,6 @@ C. The scheduler can detect logical data races (checked using assertions) for eg
 
 
 ## Acknowledgements
-This tool is part of the course project CS6215 "Advanced Topics in Program Analysis". The idea is provided by the Project Mentors of the course Dylan Wolf and Zhao Huan.
+This tool is part of the course project CS6215 "Advanced Topics in Program Analysis". The idea is provided by the Project Mentors of the course Dylan Wolff and Zhao Huan.
 
 
