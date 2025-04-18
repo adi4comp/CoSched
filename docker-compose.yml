@@ -1,0 +1,13 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app/src/
+    tty: true
+    stdin_open: true 
