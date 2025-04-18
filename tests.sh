@@ -31,6 +31,11 @@ if [-z "$iterations"]; then
     iterations=1
 fi
 
+if [ "$policy" != "random" ] && [ "$policy" != "priority" ] && [ "$policy" != "interactive" ]; then
+    echo "Invalid policy: $policy. Valid policies are: random, priority, interactive."
+    exit 1
+fi
+
 for test_file in *.py; do
     if [ -f "$test_file" ]; then
     echo "-----------------------------------------------------------------------------"
