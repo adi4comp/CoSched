@@ -1,19 +1,32 @@
-FROM python:3.9-slim
+FROM alpine:3.19
 
+
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    bash \
+    sudo
 
 WORKDIR /app
 
-
-
 COPY . .
 
-RUN pip install --no-cache-dir -r requirements.txt
-
+RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 ENV PYTHONPATH=/app/src/:$PYTHONPATH
 
+RUN adduser -D appuser && \
+    echo "appuser:appuser" | chpasswd && \
+    echo "appuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-RUN useradd -m appuser && chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /app && \
+    chmod -R 755 /app
+
+
 USER appuser
 
-CMD [ "bash" ]
+ENV SHELL=/bin/bash
+ENV TERM=xterm-256color
+
+
+CMD ["/bin/bash", "-l"]
