@@ -51,6 +51,9 @@ for test_file in *.py; do
     done
     echo "<=================================================================================>" >> logs/${test_file}.log
     error_count=$(grep -c "There is/are [0-9]\+ error in the above interleaving" logs/${test_file}.log)
+    avg_time=$(grep "Execution time:" logs/${test_file}.log | sed 's/.*Execution time: \([0-9.]*\) microseconds.*/\1/' | awk '{sum+=$1} END {if (NR > 0) print sum/NR; else print 0 }')
+    echo "Average execution time: $avg_time microseconds" >> logs/${test_file}.log
+    echo "Average execution time: $avg_time microseconds"
     if [ "$error_count" -gt 0 ]; then
         echo ""
         echo "[Tests Summary] There is/are $error_count/$iterations schedules with error in the generated interleavings (Check the error log)"

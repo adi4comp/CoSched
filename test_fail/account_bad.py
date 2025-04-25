@@ -58,6 +58,7 @@ def main():
     t2.start()
 
     t4 = Thread(target=join_thread, args=(t1, t2, t3))
+    t4.start()
     
 
 
@@ -76,5 +77,7 @@ if __name__ == "__main__":
         cosched_set_policy(1)
     
     main()
-    
+    start = time.perf_counter()
     cosched_start()
+    end = time.perf_counter()
+    print(f"Execution time: {(end - start) * 1000000:.4f} microseconds")

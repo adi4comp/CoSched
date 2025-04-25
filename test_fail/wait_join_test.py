@@ -30,4 +30,7 @@ if __name__ == "__main__":
     threads.append(Thread(target=task_2, args=(threads[0],)))
     threads.append(Thread(target=task_2, args=(threads[2],)))
     
+    start = time.perf_counter()
     cosched_start()
+    end = time.perf_counter()
+    print(f"Execution time: {(end - start) * 1000000:.4f} microseconds")

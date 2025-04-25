@@ -104,5 +104,7 @@ if __name__ == "__main__":
         cosched_set_policy(1)
     
     main()
-    
+    start = time.perf_counter()
     cosched_start()
+    end = time.perf_counter()
+    print(f"Execution time: {(end - start) * 1000000:.4f} microseconds")
