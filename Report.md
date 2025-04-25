@@ -143,13 +143,13 @@ The successful rate of detecting the concurrency bugs in these benchmarks is as 
 
 | Test Name | Priority Policy (10 runs) | Random Policy (10 Runs) | Time (in $\mu s$) (CoSched) | Time (in $\mu s$) (Python Interpreter) |
 |-----------|----------------|----------------|----------------|----------------|
-| benchmark_carter_c01.py | 6/10| 7/10 | 60.1206 |  |
-| deadlock01.py | 10/10 | 5/10 | 52.4875 | |
-| wait_join.py | 10/10 | 10/10 | 44.9918 | |
-| rlock_test.py | 10/10 | 10/10 | 1.00542e+06 | |
-| semaphore_test.py | 10/10 | 10/10 | 52.8666 | |
-| account_bad.py | 3/10 | 4/10 | 64.4792 | |
-| circular_buffer.py | 10/10 | 9/10 | 84.2124 | |
+| benchmark_carter_c01.py | 6/10| 7/10 | 60.1206 | 18.5208  |
+| deadlock01.py | 10/10 | 5/10 | 52.4875 | 124.288 |
+| wait_join.py | 10/10 | 10/10 | 44.9918 | 16.0832 |
+| rlock_test.py | 10/10 | 10/10 | 1.00542e+06 | 14.0667 |
+| semaphore_test.py | 10/10 | 10/10 | 52.8666 | 15.2083 |
+| account_bad.py | 3/10 | 4/10 | 64.4792 | 201.229 |
+| circular_buffer.py | 10/10 | 9/10 | 84.2124 | 126.962 |
 
 These rates demonstrate that the priority policy as the intution suggest is better in exploring problematic interleavings, since each thread is given a chance to run before one of the previously ran thread is picked again, thereby creating more dense interleavings. But we also observed in some runs random policy also performed well but the regeneration of these schedules is not deterministic (depends on the random seed),  but priority will pick the thread in similar permutations thereby maximizing the detection of concurrency issues deterministically in cases where the interleavings are very fine grained (after being serialized).
 
