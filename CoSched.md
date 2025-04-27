@@ -1,10 +1,10 @@
-# CS6215 Project Report
+# CoSched: Controlled Concurrency Testing for Python
 
-**By: Aditya Ranjan Jha**
+> **Project Report for CS6215 by: *Aditya Ranjan Jha***
 
 ## Introduction
 
-In concurrent programming, multiple threads or processes run simultaneously, potentially sharing resources. Most modern systems, including operating systems, are multi-threaded. However, the interleavings among threads can be non-deterministic, making it very hard to formally verify the correctness of concurrent programs. An alternative approach is to use testing to identify potential bugs. Systematically testing a concurrent program to explore all possible interleavings is not feasible because it would require testing at the granularity of each instruction. For a program with *N* threads, each with *M* lines of code, this could mean *N! × M!* different orders—a computationally infeasible task. Instead, we can exercise control over possible schedules by making choices at interesting points in the program, such as synchronization operations. This is called controlled concurrency testing. In this project, we propose **CoSched**, a tool that controls interleavings by generating schedules based on the synchronization primitives used between different threads.
+In concurrent programming [[2]](#references), multiple threads or processes run simultaneously, potentially sharing resources. Most modern systems, including operating systems, are multi-threaded. However, the interleavings among threads can be non-deterministic, making it very hard to formally verify [[4,7.8]](#references) the correctness of concurrent programs. An alternative approach is to use testing to identify potential bugs [[1,5,6]](#references). Systematically testing a concurrent program to explore all possible interleavings is not feasible because it would require testing at the granularity of each instruction. For a program with *N* threads, each with *M* lines of code, this could mean *N! × M!* different orders—a computationally infeasible task. Instead, we can exercise control over possible schedules by making choices at interesting points in the program, such as synchronization operations. This is called controlled concurrency testing. In this project, we propose **CoSched**, a tool that controls interleavings by generating schedules based on the synchronization primitives used between different threads.
 
 ## Background
 
@@ -138,10 +138,10 @@ The benchmark programs are:
 | `circular_buffer.py` | Data Race | Demonstrates producer-consumer race conditions |
 
 
-The successful rate of detecting the concurrency bugs in these benchmarks is as follows:
+The success rate of detecting the concurrency bugs in these benchmarks is as follows:
 
 
-| Test Name | Priority Policy (10 runs) | Random Policy (10 Runs) | Time (in $\mu s$) (CoSched) | Time (in $\mu s$) (Python Interpreter) |
+| Test Name | Priority Policy (10 runs) | Random Policy (10 Runs) | Time (in µs) (CoSched) | Time (in µs) (Python Interpreter) |
 |-----------|----------------|----------------|----------------|----------------|
 | benchmark_carter_c01.py | 6/10| 7/10 | 60.1206 | 18.5208  |
 | deadlock01.py | 10/10 | 5/10 | 52.4875 | 124.288 |
@@ -151,9 +151,36 @@ The successful rate of detecting the concurrency bugs in these benchmarks is as 
 | account_bad.py | 3/10 | 4/10 | 64.4792 | 201.229 |
 | circular_buffer.py | 10/10 | 9/10 | 84.2124 | 126.962 |
 
-These rates demonstrate that the priority policy as the intution suggest is better in exploring problematic interleavings, since each thread is given a chance to run before one of the previously ran thread is picked again, thereby creating more dense interleavings. But we also observed in some runs random policy also performed well but the regeneration of these schedules is not deterministic (depends on the random seed),  but priority will pick the thread in similar permutations thereby maximizing the detection of concurrency issues deterministically in cases where the interleavings are very fine grained (after being serialized).
+These rates demonstrate that the priority policy as the intuition suggests is better in exploring problematic interleavings, since each thread is given a chance to run before one of the previously ran thread is picked again, thereby creating more dense interleavings. But we also observed in some runs random policy also performed well but the regeneration of these schedules is not deterministic (depends on the random seed),  but priority will pick the thread in similar permutations thereby maximizing the detection of concurrency issues deterministically in cases where the interleavings are very fine grained (after being serialized).
+
+The performance of Cosched has comparable overheads to the Python interpreter, with the added benefit of detecting concurrency bugs. The large overhead in case of rlock is due to the nature of the benchmark itself where there are only sync primitives and each time a lock is acquired, the scheduler has to update the state of the lock and the thread and check if some threads can be released or not.
 
 
 ## Conclusion
 
 CoSched offers a practical approach to testing concurrent Python programs by controlling thread execution through synchronization primitives and a flexible scheduler. Its use of greenlets ensures compatibility with existing code, making it a valuable tool as Python moves beyond the GIL. Future enhancements could include more sophisticated scheduling policies and performance optimizations.
+
+## Acknowledgments
+
+This project design sketch was suggested by Project Mentors Dylan Wolff and Zhao Huan. The project was developed as part of the CS6215 course project "Advanced Topics in Program Analysis" where the ideas were proposed by teaching assistant Yuntong Zhang. The benchmarks were adapted from the C concurrency testing tool Period [[1]](https://github.com/wcventure/PERIOD).
+
+
+## References
+
+1. Cheng Wen, Mengda He, Bohao Wu, Zhiwu Xu, and Shengchao Qin. 2022. Controlled concurrency testing via periodical scheduling. In Proceedings of the 44th International Conference on Software Engineering (ICSE '22). Association for Computing Machinery, New York, NY, USA, 474–486. https://doi.org/10.1145/3510003.3510178
+
+2. Fu, H., Wang, Z., Chen, X., & Fan, X. (2017). A systematic survey on automated concurrency bug detection, exposing, avoidance, and fixing techniques. Software Quality Journal, 26(3), 855–889. https://doi.org/10.1007/s11219-017-9385-3
+
+3. Jan Wen Voung, Ranjit Jhala, and Sorin Lerner. 2007. RELAY: static race detection on millions of lines of code. In Proceedings of the the 6th joint meeting of the European software engineering conference and the ACM SIGSOFT symposium on The foundations of software engineering (ESEC-FSE '07). Association for Computing Machinery, New York, NY, USA, 205–214. https://doi.org/10.1145/1287624.1287654
+
+4. Agarwal, Pratyush, et al. "Stateless model checking under a reads-value-from equivalence." International Conference on Computer Aided Verification. Cham: Springer International Publishing, 2021.
+
+
+5. Kunpeng Yu, Chenxu Wang, Yan Cai, Xiapu Luo, and Zijiang Yang. 2021. Detecting concurrency vulnerabilities based on partial orders of memory and thread events. In Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE 2021). Association for Computing Machinery, New York, NY, USA, 280–291. https://doi.org/10.1145/3468264.3468572
+
+
+6. Dylan Wolff, Zheng Shi, Gregory J. Duck, Umang Mathur, and Abhik Roychoudhury. 2024. Greybox Fuzzing for Concurrency Testing. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (ASPLOS '24), Vol. 2. Association for Computing Machinery, New York, NY, USA, 482–498. https://doi.org/10.1145/3620665.3640389
+
+7. Azadeh Farzan, Dominik Klumpp, and Andreas Podelski. 2022. Sound sequentialization for concurrent program verification. In Proceedings of the 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation (PLDI 2022). Association for Computing Machinery, New York, NY, USA, 506–521. https://doi.org/10.1145/3519939.3523727
+
+8. Rasin, Dan, Orna Grumberg, and Sharon Shoham. "Modular verification of concurrent programs via sequential model checking." Automated Technology for Verification and Analysis: 16th International Symposium, ATVA 2018, Los Angeles, CA, USA, October 7-10, 2018, Proceedings 16. Springer International Publishing, 2018.
